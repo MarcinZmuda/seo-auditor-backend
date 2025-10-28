@@ -3,15 +3,18 @@ from sqlalchemy.orm import Session
 from database import AuditJob
 import uuid
 
-def create_job(db: Session, domain: str, onpage_task_id: str, lighthouse_task_id: str) -> AuditJob:
+def create_job(db: Session, domain: str) -> AuditJob:
     """Tworzy nowy wpis zadania w bazie danych."""
+    
+    # Generujemy unikalny, losowy ID dla naszego zadania
     job_id = f"job-{uuid.uuid4()}"
     
     new_job = AuditJob(
         job_id=job_id,
         domain=domain,
-        onpage_task_id=onpage_task_id,
-        lighthouse_task_id=lighthouse_task_id
+        # ID zadań D4SEO dodamy za chwilę
+        onpage_task_id="temp_onpage", 
+        lighthouse_task_id="temp_lh"
     )
     db.add(new_job)
     db.commit()
@@ -22,11 +25,11 @@ def get_job(db: Session, job_id: str) -> AuditJob | None:
     """Pobiera zadanie z bazy po jego ID."""
     return db.query(AuditJob).filter(AuditJob.job_id == job_id).first()
 
-def update_job_status(db: Session, job_id: str, updates: dict) -> AuditJob:
-    """Aktualizuje statusy lub dane zadania."""
+def update_job(db: Session, job_id: str, updates: dict) -> AuditJob:
+    """Aktualizuje pola w istniejącym zadaniu (np. status lub ID zadania)."""
     job = get_job(db, job_id)
     if not job:
-        raise ValueError("Job not found")
+        raise ValueError(f"Job o ID {job_id} nie istnieje.")
     
     for key, value in updates.items():
         setattr(job, key, value)
@@ -36,7 +39,7 @@ def update_job_status(db: Session, job_id: str, updates: dict) -> AuditJob:
     return job
 
 def delete_job(db: Session, job_id: str):
-    """Usuwa zadanie z bazy."""
+    """Usuwa zadanie z bazy (np. po pomyślnym zakończeniu)."""
     job = get_job(db, job_id)
     if job:
         db.delete(job)
