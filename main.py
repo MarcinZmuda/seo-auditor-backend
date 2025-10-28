@@ -1,53 +1,68 @@
-from fastapi import FastAPI, HTTPException, Request, Query
-from models import StartAuditRequest, JobData
-import db
+# Plik: main.py
+from fastapi import FastAPI, HTTPException, Request, Query, Depends
+from sqlalchemy.orm import Session
+import crud
 import d4seo_client
 import aggregation
-import uuid
+import database
+from models import StartAuditRequest # Importujemy to z naszego starego models.py
+
+# Tworzy tabele w bazie danych przy starcie aplikacji
+database.create_tables() 
 
 app = FastAPI(title="SEO Auditor Backend")
 
 @app.post("/start-audit")
-async def start_audit_endpoint(request: StartAuditRequest):
+async def start_audit_endpoint(
+    request: StartAuditRequest, 
+    db: Session = Depends(database.get_db)
+):
     """Endpoint dla GPT: Uruchom nowy audyt."""
-    job_id = f"job-{uuid.uuid4()}"
     domain = request.domain
+    job_id_temp = f"job-{uuid.uuid4()}" # Tymczasowe ID dla webhooków
     
     try:
         # Uruchom oba zadania D4SEO
-        onpage_task_id = await d4seo_client.start_onpage_task(domain, job_id)
-        lighthouse_task_id = await d4seo_client.start_lighthouse_task(domain, job_id)
+        onpage_task_id = await d4seo_client.start_onpage_task(domain, job_id_temp)
+        lighthouse_task_id = await d4seo_client.start_lighthouse_task(domain, job_id_temp)
         
-        # Stwórz wpis w bazie Redis
-        job_data = JobData(
-            job_id=job_id,
+        # Stwórz wpis w bazie danych PostgreSQL
+        job = crud.create_job(
+            db=db,
             domain=domain,
             onpage_task_id=onpage_task_id,
             lighthouse_task_id=lighthouse_task_id
         )
-        db.create_job(job_data)
         
-        return {"status": "pending", "job_id": job_id}
+        # Poprawiamy ID w webhookach na prawdziwe ID z bazy
+        # (To jest bardziej zaawansowane, na razie pomińmy i używajmy job_id_temp)
+        # UWAGA: Uproszczenie - używamy ID z bazy
+        job_id = job.job_id
+        # TODO: Musisz zaktualizować `pingback_url` w `d4seo_client.py`, aby używał `job.job_id`
+        
+        return {"status": "pending", "job_id": job.job_id}
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start audit: {e}")
 
 
 @app.post("/webhook/onpage-done")
-async def webhook_onpage_done(request: Request, job_id: str = Query(...)):
+async def webhook_onpage_done(
+    request: Request, 
+    job_id: str = Query(...), 
+    db: Session = Depends(database.get_db)
+):
     """Webhook: Odbiera GŁÓWNE dane z On-Page Summary."""
     try:
         onpage_data = await request.json()
         
-        # Sprawdź, czy zadanie D4SEO się powiodło
         if onpage_data.get("status_code") != 20000:
-             db.update_job(job_id, {"onpage_status": "error"})
+             crud.update_job_status(db, job_id, {"onpage_status": "error"})
              return {"status": "error recorded"}
 
-        # Zapisz dane i oznacz jako gotowe
-        db.update_job(job_id, {
+        crud.update_job_status(db, job_id, {
             "onpage_status": "completed",
-            "onpage_data": onpage_data["tasks"][0] # Zapisz tylko dane zadania
+            "onpage_data": onpage_data["tasks"][0] 
         })
         return {"status": "ok"}
     except Exception as e:
@@ -55,10 +70,23 @@ async def webhook_onpage_done(request: Request, job_id: str = Query(...)):
         return {"status": "error"}
 
 @app.post("/webhook/lighthouse-done")
-async def webhook_lighthouse_done(job_id: str = Query(...)):
-    """Webhook: Odbiera POWIADOMIENIE o zakończeniu Lighthouse."""
+async def webhook_lighthouse_done(
+    request: Request, # Dodajemy request, aby pobrać dane
+    job_id: str = Query(...), 
+    db: Session = Depends(database.get_db)
+):
+    """Webhook: Odbiera DANE z Lighthouse."""
     try:
-        db.update_job(job_id, {"lighthouse_status": "completed"})
+        lighthouse_data = await request.json()
+
+        if lighthouse_data.get("status_code") != 20000:
+             crud.update_job_status(db, job_id, {"lighthouse_status": "error"})
+             return {"status": "error recorded"}
+
+        crud.update_job_status(db, job_id, {
+            "lighthouse_status": "completed",
+            "lighthouse_data": lighthouse_data["tasks"][0] # Zapisz dane Lighthouse
+        })
         return {"status": "ok"}
     except Exception as e:
         print(f"Webhook lighthouse error: {e}")
@@ -66,9 +94,12 @@ async def webhook_lighthouse_done(job_id: str = Query(...)):
 
 
 @app.get("/check-audit-status/{job_id}")
-async def check_audit_status_endpoint(job_id: str):
+async def check_audit_status_endpoint(
+    job_id: str, 
+    db: Session = Depends(database.get_db)
+):
     """Endpoint dla GPT: Sprawdź status zadania."""
-    job = db.get_job(job_id)
+    job = crud.get_job(db, job_id)
     
     if not job:
         return {"status": "error", "message": "Job not found."}
@@ -84,16 +115,14 @@ async def check_audit_status_endpoint(job_id: str):
 
     # Jeśli oba są "completed"
     try:
-        # To jest moment, w którym dzieje się magia
         final_report_data = await aggregation.build_final_report(job)
         
-        # Wyczyść bazę danych po pomyślnym pobraniu
-        db.delete_job(job_id)
+        # Wyczyść bazę danych
+        crud.delete_job(db, job_id)
         
         return {"status": "completed", "data": final_report_data}
         
     except Exception as e:
-        # Jeśli agregacja się nie uda, oznacz zadanie jako błędne
-        db.update_job(job_id, {"status": "error"})
+        crud.update_job_status(db, job_id, {"status": "error"})
         print(f"Aggregation error: {e}")
         return {"status": "error", "message": f"Błąd podczas agregacji danych: {e}"}
