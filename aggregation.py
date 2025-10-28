@@ -1,9 +1,9 @@
 # Plik: aggregation.py
 import asyncio
 import d4seo_client
-from database import AuditJob  # <-- POPRAWNY IMPORT
+from database import AuditJob  # Importujemy model bazy danych
 
-async def build_final_report(job: AuditJob) -> dict: # <-- UŻYCIE POPRAWNEGO MODELU
+async def build_final_report(job: AuditJob, onpage_summary_data: dict, lighthouse_data: dict) -> dict:
     """
     Orkiestrator agregacji. Pobiera wszystkie dane ze wszystkich endpointów D4SEO
     i buduje finalny JSON dla GPT.
@@ -15,17 +15,11 @@ async def build_final_report(job: AuditJob) -> dict: # <-- UŻYCIE POPRAWNEGO MO
     raw_data = {}
     
     # --- Krok 1: Dane bazowe już mamy ---
-    # Dane zostały zapisane w bazie przez webhooki
     onpage_task_id = job.onpage_task_id
-    lighthouse_task_id = job.lighthouse_task_id
     
-    # Sprawdź, czy dane na pewno są w obiekcie job
-    if not job.onpage_data or not job.lighthouse_data:
-        raise ValueError("Brak danych 'onpage_data' lub 'lighthouse_data' w obiekcie job.")
-        
-    raw_data["summary"] = job.onpage_data.get("result", [{}])[0]
-    raw_data["lighthouse_full"] = job.lighthouse_data.get("result", [{}])[0]
-
+    # Przypisujemy dane, które właśnie pobraliśmy w main.py
+    raw_data["summary"] = onpage_summary_data
+    raw_data["lighthouse_full"] = lighthouse_data
 
     # --- Krok 2: Uruchom wszystkie zapytania o dane RÓWNOLEGLE ---
     try:
@@ -38,7 +32,7 @@ async def build_final_report(job: AuditJob) -> dict: # <-- UŻYCIE POPRAWNEGO MO
             d4seo_client.get_onpage_non_indexable(onpage_task_id),
             d4seo_client.get_onpage_redirect_chains(onpage_task_id),
             d4seo_client.get_security_headers(job.domain)
-            # TODO: Dodaj tutaj resztę wywołań (np. duplicate_content)
+            # TODO: Dodaj tutaj resztę wywołań (np. duplicate_content, content_parsing)
         )
         
         # Przypisz wyniki do słownika dla łatwiejszego dostępu
