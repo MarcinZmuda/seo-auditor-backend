@@ -4,5 +4,5 @@ gunicorn
 httpx
 pydantic
 python-dotenv
-sqlalchemy  # NOWA (To jest ORM - ułatwia pracę z bazą)
-psycopg2-binary # NOWA (To jest "sterownik" do PostgreSQL)
+sqlalchemy
+psycopg2-binary
