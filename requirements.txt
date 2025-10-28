@@ -1,7 +1,8 @@
 fastapi
 uvicorn
 gunicorn
-redis
 httpx
 pydantic
 python-dotenv
+sqlalchemy  # NOWA (To jest ORM - ułatwia pracę z bazą)
+psycopg2-binary # NOWA (To jest "sterownik" do PostgreSQL)
