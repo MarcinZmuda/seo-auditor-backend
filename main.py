@@ -6,7 +6,7 @@ import d4seo_client
 import aggregation
 import database
 from models import StartAuditRequest
-import httpx  # <--- BRAKUJĄCY IMPORT
+import httpx
 import uuid
 import os
 
@@ -17,7 +17,7 @@ load_dotenv()
 # Tworzy tabele w bazie danych przy starcie aplikacji
 database.create_tables() 
 
-app = FastAPI(title="SEO Auditor Backend", version="1.0.0")
+app = FastAPI(title="SEO Auditor Backend", version="1.1.0") # Podnieśliśmy wersję
 
 @app.on_event("startup")
 async def startup_event():
@@ -74,20 +74,22 @@ async def webhook_onpage_done(
     job_id: str = Query(...), 
     db: Session = Depends(database.get_db)
 ):
-    """Webhook: Odbiera DANE z On-Page Summary."""
+    """
+    Webhook: Odbiera POWIADOMIENIE o zakończeniu On-Page.
+    Nie zapisuje już danych, tylko zmienia status.
+    """
     print(f"[{job_id}] Otrzymano Webhook: On-Page GOTOWY.")
     try:
-        onpage_data = await request.json()
+        notification_data = await request.json()
         
-        if onpage_data.get("status_code") != 20000:
-             print(f"[{job_id}] Błąd w webhooku On-Page: {onpage_data.get('status_message')}")
+        if notification_data.get("status_code") != 20000:
+             print(f"[{job_id}] Błąd w webhooku On-Page: {notification_data.get('status_message')}")
              crud.update_job(db, job_id, {"onpage_status": "error"})
              return {"status": "error recorded"}
 
-        # Zapisz pełne dane summary i oznacz jako gotowe
+        # POPRAWKA: Zapisujemy tylko status, nie dane.
         crud.update_job(db, job_id, {
-            "onpage_status": "completed",
-            "onpage_data": onpage_data["tasks"][0] 
+            "onpage_status": "completed"
         })
         return {"status": "ok"}
     except Exception as e:
@@ -100,20 +102,22 @@ async def webhook_lighthouse_done(
     job_id: str = Query(...), 
     db: Session = Depends(database.get_db)
 ):
-    """Webhook: Odbiera DANE z Lighthouse."""
+    """
+    Webhook: Odbiera POWIADOMIENIE o zakończeniu Lighthouse.
+    Nie zapisuje już danych, tylko zmienia status.
+    """
     print(f"[{job_id}] Otrzymano Webhook: Lighthouse GOTOWY.")
     try:
-        lighthouse_data = await request.json()
+        notification_data = await request.json()
 
-        if lighthouse_data.get("status_code") != 20000:
-             print(f"[{job_id}] Błąd w webhooku Lighthouse: {lighthouse_data.get('status_message')}")
+        if notification_data.get("status_code") != 20000:
+             print(f"[{job_id}] Błąd w webhooku Lighthouse: {notification_data.get('status_message')}")
              crud.update_job(db, job_id, {"lighthouse_status": "error"})
              return {"status": "error recorded"}
 
-        # Zapisz pełne dane Lighthouse i oznacz jako gotowe
+        # POPRAWKA: Zapisujemy tylko status, nie dane.
         crud.update_job(db, job_id, {
-            "lighthouse_status": "completed",
-            "lighthouse_data": lighthouse_data["tasks"][0] 
+            "lighthouse_status": "completed"
         })
         return {"status": "ok"}
     except Exception as e:
@@ -146,18 +150,25 @@ async def check_audit_status_endpoint(
         print(f"[{job_id}] Status: Lighthouse w toku.")
         return {"status": "pending", "message": "Skan Lighthouse (krok 2/2) jest w toku..."}
 
-    # Jeśli oba są "completed"
+    # === POPRAWKA LOGIKI: TUTAJ POBIERAMY DANE ===
     if job.onpage_status == "completed" and job.lighthouse_status == "completed":
         print(f"[{job_id}] Oba zadania gotowe. Rozpoczynanie agregacji...")
         try:
-            # Sprawdź, czy dane istnieją, zanim zaczniesz agregację
-            if not job.onpage_data or not job.lighthouse_data:
-                print(f"[{job_id}] BŁĄD: Status 'completed', ale brak danych w bazie.")
-                return {"status": "error", "message": "Błąd wewnętrzny: brak danych do agregacji."}
-
-            final_report_data = await aggregation.build_final_report(job)
+            # 1. Pobierz surowe dane, których nam brakowało
+            print(f"[{job_id}] Pobieranie wyników OnPage Summary...")
+            onpage_summary_data = await d4seo_client.get_onpage_summary(job.onpage_task_id)
             
-            # Usuń zadanie z bazy w tle, aby nie blokować odpowiedzi do GPT
+            print(f"[{job_id}] Pobieranie wyników Lighthouse...")
+            lighthouse_data = await d4seo_client.get_lighthouse_data(job.lighthouse_task_id)
+
+            # 2. Wywołaj agregację z nowymi danymi
+            final_report_data = await aggregation.build_final_report(
+                job, 
+                onpage_summary_data, 
+                lighthouse_data
+            )
+            
+            # 3. Usuń zadanie z bazy w tle
             background_tasks.add_task(crud.delete_job, db, job_id)
             
             print(f"[{job_id}] Agregacja zakończona. Zwracanie pełnych danych do GPT.")
