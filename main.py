@@ -6,6 +6,7 @@ import d4seo_client
 import aggregation
 import database
 from models import StartAuditRequest
+import httpx  # <--- BRAKUJĄCY IMPORT
 import uuid
 import os
 
@@ -14,7 +15,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Tworzy tabele w bazie danych przy starcie aplikacji
-# W środowisku produkcyjnym Render, to jest bezpieczne
 database.create_tables() 
 
 app = FastAPI(title="SEO Auditor Backend", version="1.0.0")
@@ -63,9 +63,9 @@ async def start_audit_endpoint(
     except Exception as e:
         print(f"[ERROR] /start-audit: {e}")
         # Jeśli coś pójdzie nie tak, usuń tymczasowy wpis
-        if 'job_id' in locals():
-            crud.delete_job(db, job_id)
-        raise HTTPException(status_code=500, detail=f"Failed to start audit: {e}")
+        if 'job' in locals() and job:
+            crud.delete_job(db, job.job_id)
+        raise HTTPException(status_code=500, detail=f"Failed to start audit: {str(e)}")
 
 
 @app.post("/webhook/onpage-done")
@@ -87,7 +87,7 @@ async def webhook_onpage_done(
         # Zapisz pełne dane summary i oznacz jako gotowe
         crud.update_job(db, job_id, {
             "onpage_status": "completed",
-            "onpage_data": onpage_data["tasks"][0]
+            "onpage_data": onpage_data["tasks"][0] 
         })
         return {"status": "ok"}
     except Exception as e:
@@ -150,7 +150,11 @@ async def check_audit_status_endpoint(
     if job.onpage_status == "completed" and job.lighthouse_status == "completed":
         print(f"[{job_id}] Oba zadania gotowe. Rozpoczynanie agregacji...")
         try:
-            # To jest moment, w którym dzieje się magia
+            # Sprawdź, czy dane istnieją, zanim zaczniesz agregację
+            if not job.onpage_data or not job.lighthouse_data:
+                print(f"[{job_id}] BŁĄD: Status 'completed', ale brak danych w bazie.")
+                return {"status": "error", "message": "Błąd wewnętrzny: brak danych do agregacji."}
+
             final_report_data = await aggregation.build_final_report(job)
             
             # Usuń zadanie z bazy w tle, aby nie blokować odpowiedzi do GPT
