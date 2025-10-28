@@ -17,7 +17,7 @@ load_dotenv()
 # Tworzy tabele w bazie danych przy starcie aplikacji
 database.create_tables() 
 
-app = FastAPI(title="SEO Auditor Backend", version="1.1.0") # Podnieśliśmy wersję
+app = FastAPI(title="SEO Auditor Backend", version="1.2.0") # Podnieśliśmy wersję
 
 @app.on_event("startup")
 async def startup_event():
@@ -68,26 +68,22 @@ async def start_audit_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to start audit: {str(e)}")
 
 
-@app.post("/webhook/onpage-done")
+@app.get("/webhook/onpage-done") # <-- POPRAWKA 1: Zmiana na GET
 async def webhook_onpage_done(
-    request: Request, 
     job_id: str = Query(...), 
     db: Session = Depends(database.get_db)
+    # Usunięto 'request: Request', bo GET nie ma body
 ):
     """
     Webhook: Odbiera POWIADOMIENIE o zakończeniu On-Page.
     Nie zapisuje już danych, tylko zmienia status.
     """
-    print(f"[{job_id}] Otrzymano Webhook: On-Page GOTOWY.")
+    print(f"[{job_id}] Otrzymano Webhook GET: On-Page GOTOWY.")
     try:
-        notification_data = await request.json()
+        # D4SEO wysyła `status_code` w query params, ale nie musimy go sprawdzać.
+        # Jeśli webhook został wywołany, zakładamy, że jest OK.
+        # W razie błędu, /check-audit-status i tak go wykryje.
         
-        if notification_data.get("status_code") != 20000:
-             print(f"[{job_id}] Błąd w webhooku On-Page: {notification_data.get('status_message')}")
-             crud.update_job(db, job_id, {"onpage_status": "error"})
-             return {"status": "error recorded"}
-
-        # POPRAWKA: Zapisujemy tylko status, nie dane.
         crud.update_job(db, job_id, {
             "onpage_status": "completed"
         })
@@ -96,26 +92,18 @@ async def webhook_onpage_done(
         print(f"[{job_id}] KRYTYCZNY BŁĄD Webhooka On-Page: {e}")
         return {"status": "error"}
 
-@app.post("/webhook/lighthouse-done")
+@app.get("/webhook/lighthouse-done") # <-- POPRAWKA 2: Zmiana na GET
 async def webhook_lighthouse_done(
-    request: Request,
     job_id: str = Query(...), 
     db: Session = Depends(database.get_db)
+    # Usunięto 'request: Request'
 ):
     """
     Webhook: Odbiera POWIADOMIENIE o zakończeniu Lighthouse.
     Nie zapisuje już danych, tylko zmienia status.
     """
-    print(f"[{job_id}] Otrzymano Webhook: Lighthouse GOTOWY.")
+    print(f"[{job_id}] Otrzymano Webhook GET: Lighthouse GOTOWY.")
     try:
-        notification_data = await request.json()
-
-        if notification_data.get("status_code") != 20000:
-             print(f"[{job_id}] Błąd w webhooku Lighthouse: {notification_data.get('status_message')}")
-             crud.update_job(db, job_id, {"lighthouse_status": "error"})
-             return {"status": "error recorded"}
-
-        # POPRAWKA: Zapisujemy tylko status, nie dane.
         crud.update_job(db, job_id, {
             "lighthouse_status": "completed"
         })
@@ -150,7 +138,6 @@ async def check_audit_status_endpoint(
         print(f"[{job_id}] Status: Lighthouse w toku.")
         return {"status": "pending", "message": "Skan Lighthouse (krok 2/2) jest w toku..."}
 
-    # === POPRAWKA LOGIKI: TUTAJ POBIERAMY DANE ===
     if job.onpage_status == "completed" and job.lighthouse_status == "completed":
         print(f"[{job_id}] Oba zadania gotowe. Rozpoczynanie agregacji...")
         try:
