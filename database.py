@@ -14,7 +14,9 @@ if not DATABASE_URL:
     # W trybie lokalnym możesz ustawić domyślny URL, np.:
     # DATABASE_URL = "postgresql://user:password@localhost/seo_auditor_db"
 
-engine = create_engine(DATABASE_URL)
+# SQLAlchemy setup
+# POPRAWKA: Dodajemy `connect_args={"sslmode": "require"}`
+engine = create_engine(DATABASE_URL, connect_args={"sslmode": "require"})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Base to klasa bazowa dla naszych modeli tabel
@@ -42,8 +44,8 @@ class AuditJob(Base):
     lighthouse_task_id = Column(String)
     lighthouse_status = Column(String, default="pending")
     
-    # Przechowujemy surowe dane z D4SEO w formacie JSON
-    # Uzupełnimy je, gdy webhooki nas powiadomią
+    # Przechowujemy surowe dane jako JSON
+    # Uzupełnimy je, gdy /check-audit-status je pobierze
     onpage_data = Column(JSON, nullable=True)
     lighthouse_data = Column(JSON, nullable=True)
     
