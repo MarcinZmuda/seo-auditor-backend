@@ -1,9 +1,9 @@
 # Plik: aggregation.py
 import asyncio
 import d4seo_client
-from database import AuditJob
+from database import AuditJob  # <-- POPRAWNY IMPORT
 
-async def build_final_report(job: AuditJob) -> dict:
+async def build_final_report(job: AuditJob) -> dict: # <-- UŻYCIE POPRAWNEGO MODELU
     """
     Orkiestrator agregacji. Pobiera wszystkie dane ze wszystkich endpointów D4SEO
     i buduje finalny JSON dla GPT.
@@ -14,25 +14,35 @@ async def build_final_report(job: AuditJob) -> dict:
     # Przechowujemy wszystkie pobrane dane tutaj
     raw_data = {}
     
-    # --- Krok 1: Uruchom wszystkie zapytania o dane RÓWNOLEGLE ---
+    # --- Krok 1: Dane bazowe już mamy ---
+    # Dane zostały zapisane w bazie przez webhooki
+    onpage_task_id = job.onpage_task_id
+    lighthouse_task_id = job.lighthouse_task_id
+    
+    # Sprawdź, czy dane na pewno są w obiekcie job
+    if not job.onpage_data or not job.lighthouse_data:
+        raise ValueError("Brak danych 'onpage_data' lub 'lighthouse_data' w obiekcie job.")
+        
+    raw_data["summary"] = job.onpage_data.get("result", [{}])[0]
+    raw_data["lighthouse_full"] = job.lighthouse_data.get("result", [{}])[0]
+
+
+    # --- Krok 2: Uruchom wszystkie zapytania o dane RÓWNOLEGLE ---
     try:
         results = await asyncio.gather(
-            d4seo_client.get_onpage_summary(job.onpage_task_id),
-            d4seo_client.get_lighthouse_data(job.lighthouse_task_id),
-            d4seo_client.get_onpage_pages(job.onpage_task_id),
-            d4seo_client.get_onpage_duplicate_tags(job.onpage_task_id),
-            d4seo_client.get_onpage_links(job.onpage_task_id),
-            d4seo_client.get_onpage_resources(job.onpage_task_id),
-            d4seo_client.get_onpage_non_indexable(job.onpage_task_id),
-            d4seo_client.get_onpage_redirect_chains(job.onpage_task_id),
+            # Pomijamy get_onpage_summary i get_lighthouse_data, bo już je mamy
+            d4seo_client.get_onpage_pages(onpage_task_id),
+            d4seo_client.get_onpage_duplicate_tags(onpage_task_id),
+            d4seo_client.get_onpage_links(onpage_task_id),
+            d4seo_client.get_onpage_resources(onpage_task_id),
+            d4seo_client.get_onpage_non_indexable(onpage_task_id),
+            d4seo_client.get_onpage_redirect_chains(onpage_task_id),
             d4seo_client.get_security_headers(job.domain)
             # TODO: Dodaj tutaj resztę wywołań (np. duplicate_content)
         )
         
         # Przypisz wyniki do słownika dla łatwiejszego dostępu
         (
-            raw_data["summary"],
-            raw_data["lighthouse"],
             raw_data["pages"],
             raw_data["duplicate_tags"],
             raw_data["links"],
@@ -46,13 +56,13 @@ async def build_final_report(job: AuditJob) -> dict:
         print(f"[{job.job_id}] BŁĄD KRYTYCZNY podczas pobierania danych szczegółowych: {e}")
         raise
 
-    # --- Krok 2: Zbuduj finalny JSON (Mapowanie) ---
+    # --- Krok 3: Zbuduj finalny JSON (Mapowanie) ---
     print(f"[{job.job_id}] Mapowanie danych...")
     
     # Skróty do najczęściej używanych danych
     summary_metrics = raw_data["summary"].get("page_metrics", {})
     summary_checks = summary_metrics.get("checks", {})
-    lighthouse_items = raw_data["lighthouse"].get("items", [{}])[0]
+    lighthouse_items = raw_data["lighthouse_full"].get("items", [{}])[0]
     
     # --- Sekcja 1: Meta-dane ---
     meta_findings = {
