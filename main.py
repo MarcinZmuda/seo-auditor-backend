@@ -17,7 +17,7 @@ load_dotenv()
 # Tworzy tabele w bazie danych przy starcie aplikacji
 database.create_tables() 
 
-app = FastAPI(title="SEO Auditor Backend", version="1.2.0") # Podnieśliśmy wersję
+app = FastAPI(title="SEO Auditor Backend", version="1.2.0")  # Podnieśliśmy wersję
 
 @app.on_event("startup")
 async def startup_event():
@@ -68,45 +68,30 @@ async def start_audit_endpoint(
         raise HTTPException(status_code=500, detail=f"Failed to start audit: {str(e)}")
 
 
-@app.get("/webhook/onpage-done") # <-- POPRAWKA 1: Zmiana na GET
+@app.get("/webhook/onpage-done")
 async def webhook_onpage_done(
     job_id: str = Query(...), 
     db: Session = Depends(database.get_db)
-    # Usunięto 'request: Request', bo GET nie ma body
 ):
-    """
-    Webhook: Odbiera POWIADOMIENIE o zakończeniu On-Page.
-    Nie zapisuje już danych, tylko zmienia status.
-    """
+    """Webhook: Odbiera POWIADOMIENIE o zakończeniu On-Page."""
     print(f"[{job_id}] Otrzymano Webhook GET: On-Page GOTOWY.")
     try:
-        # D4SEO wysyła `status_code` w query params, ale nie musimy go sprawdzać.
-        # Jeśli webhook został wywołany, zakładamy, że jest OK.
-        # W razie błędu, /check-audit-status i tak go wykryje.
-        
-        crud.update_job(db, job_id, {
-            "onpage_status": "completed"
-        })
+        crud.update_job(db, job_id, {"onpage_status": "completed"})
         return {"status": "ok"}
     except Exception as e:
         print(f"[{job_id}] KRYTYCZNY BŁĄD Webhooka On-Page: {e}")
         return {"status": "error"}
 
-@app.get("/webhook/lighthouse-done") # <-- POPRAWKA 2: Zmiana na GET
+
+@app.get("/webhook/lighthouse-done")
 async def webhook_lighthouse_done(
     job_id: str = Query(...), 
     db: Session = Depends(database.get_db)
-    # Usunięto 'request: Request'
 ):
-    """
-    Webhook: Odbiera POWIADOMIENIE o zakończeniu Lighthouse.
-    Nie zapisuje już danych, tylko zmienia status.
-    """
+    """Webhook: Odbiera POWIADOMIENIE o zakończeniu Lighthouse."""
     print(f"[{job_id}] Otrzymano Webhook GET: Lighthouse GOTOWY.")
     try:
-        crud.update_job(db, job_id, {
-            "lighthouse_status": "completed"
-        })
+        crud.update_job(db, job_id, {"lighthouse_status": "completed"})
         return {"status": "ok"}
     except Exception as e:
         print(f"[{job_id}] KRYTYCZNY BŁĄD Webhooka Lighthouse: {e}")
@@ -141,14 +126,14 @@ async def check_audit_status_endpoint(
     if job.onpage_status == "completed" and job.lighthouse_status == "completed":
         print(f"[{job_id}] Oba zadania gotowe. Rozpoczynanie agregacji...")
         try:
-            # 1. Pobierz surowe dane, których nam brakowało
+            # 1. Pobierz surowe dane
             print(f"[{job_id}] Pobieranie wyników OnPage Summary...")
             onpage_summary_data = await d4seo_client.get_onpage_summary(job.onpage_task_id)
             
             print(f"[{job_id}] Pobieranie wyników Lighthouse...")
             lighthouse_data = await d4seo_client.get_lighthouse_data(job.lighthouse_task_id)
 
-            # 2. Wywołaj agregację z nowymi danymi
+            # 2. Agregacja danych
             final_report_data = await aggregation.build_final_report(
                 job, 
                 onpage_summary_data, 
@@ -162,28 +147,31 @@ async def check_audit_status_endpoint(
             return {"status": "completed", "data": final_report_data}
             
         except Exception as e:
-            # Jeśli agregacja się nie uda, oznacz zadanie jako błędne
             print(f"[{job_id}] KRYTYCZNY BŁĄD agregacji: {e}")
             crud.update_job(db, job_id, {"status": "error"})
             return {"status": "error", "message": f"Błąd podczas agregacji danych: {e}"}
 
     return {"status": "error", "message": "Nieznany błąd statusu."}
 
-# Endpoint testowy, aby sprawdzić, czy serwer działa
+
+# Endpoint testowy
 @app.get("/")
 def read_root():
     return {"Hello": "World"}
+
 
 # --- 🔗 Integracja z Firestore Master SEO API ---
 from firebase_admin import firestore
 import firebase_admin
 from project_routes import register_project_routes
 
-# Zainicjuj Firestore tylko raz
+# Inicjalizacja Firestore tylko raz
 if not firebase_admin._apps:
     firebase_admin.initialize_app()
 
 db = firestore.client()
-register_project_routes(app, db)
-print("✅ [DEBUG] Firestore project_routes zarejestrowane poprawnie.")
 
+# ✅ Poprawka — przekazujemy tylko `app`
+register_project_routes(app)
+
+print("✅ [DEBUG] Firestore project_routes zarejestrowane poprawnie.")
