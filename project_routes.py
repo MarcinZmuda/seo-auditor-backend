@@ -1,18 +1,18 @@
 # Plik: project_routes.py
 from fastapi import FastAPI, Request, HTTPException
-from firebase_admin import credentials, firestore, initialize_app
+from firebase_admin import credentials, firestore
+import firebase_admin
 import base64
 import uuid
 import os
 
-# Inicjalizacja Firestore
-if not firestore._apps:
+# Inicjalizacja Firestore (Firebase Admin 6.5+)
+if not firebase_admin._apps:
     cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "firebase-key.json")
     cred = credentials.Certificate(cred_path)
-    initialize_app(cred)
+    firebase_admin.initialize_app(cred)
 
 db = firestore.client()
-
 
 def register_project_routes(app: FastAPI):
 
