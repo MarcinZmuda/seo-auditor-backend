@@ -1,51 +1,83 @@
-# --- 🔐 Inicjalizacja Firebase z ENV JSON ---
-from firebase_admin import credentials, firestore, initialize_app
-import firebase_admin
-import json
+# ---------------------------------------------------------------
+# 🔧 Konfiguracja tras dla projektów (FastAPI)
+# ---------------------------------------------------------------
+
+from fastapi import APIRouter, Request
+from firebase_admin import firestore
 import os
-import tempfile
 
-if not firebase_admin._apps:
+router = APIRouter(prefix="/api/projects", tags=["projects"])
+
+db = None
+
+# ---------------------------------------------------------------
+# 🔥 Inicjalizacja Firestore
+# ---------------------------------------------------------------
+def init_firestore():
+    global db
+    if db is not None:
+        return db
+
+    import firebase_admin
+    from firebase_admin import credentials
+
     try:
-        firebase_env = os.getenv("FIREBASE_CREDS_JSON")
+        creds_json = os.getenv("FIREBASE_CREDS_JSON")
+        if not creds_json:
+            print("❌ Brak zmiennej środowiskowej FIREBASE_CREDS_JSON")
+            return None
 
-        if not firebase_env:
-            raise ValueError("Brak zmiennej środowiskowej FIREBASE_CREDS_JSON")
+        cred_path = "/tmp/firebase-key.json"
+        with open(cred_path, "w") as f:
+            f.write(creds_json)
 
-        # 🔍 Spróbuj sparsować jako JSON
-        try:
-            creds_dict = json.loads(firebase_env)
-        except json.JSONDecodeError:
-            # jeśli Render przekazuje string z escapowanymi znakami
-            creds_dict = json.loads(firebase_env.replace("'", "\""))
-
-        # 🔧 Tworzymy tymczasowy plik z JSON (bo firebase_admin tego wymaga)
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".json") as temp_file:
-            json.dump(creds_dict, temp_file)
-            temp_file_path = temp_file.name
-
-        cred = credentials.Certificate(temp_file_path)
+        cred = credentials.Certificate(cred_path)
         firebase_admin.initialize_app(cred)
-        print("✅ Firebase zainicjalizowany poprawnie z ENV JSON")
+        db = firestore.client()
+        print("✅ Firebase i Firestore zainicjalizowane poprawnie")
+        return db
 
     except Exception as e:
-        print(f"❌ Błąd inicjalizacji Firebase: {e}")
-else:
-    print("ℹ️ Firebase już był zainicjalizowany wcześniej.")
+        print(f"❌ Błąd inicjalizacji Firestore: {e}")
+        return None
 
-try:
-    db = firestore.client()
-    print("✅ Firestore client aktywny.")
-except Exception as e:
-    db = None
-    print(f"❌ Nie udało się połączyć z Firestore: {e}")
 
 # ---------------------------------------------------------------
-# 🔧 Funkcja rejestrująca blueprint
+# 📦 Endpoint: dodaj nowy projekt
 # ---------------------------------------------------------------
-def register_project_routes(app, _db=None):
-    global db
-    if _db:
-        db = _db
-    app.register_blueprint(project_bp)
-    print("✅ [DEBUG] Zarejestrowano project_routes (Firestore mode).")
+@router.post("/")
+async def add_project(request: Request):
+    data = await request.json()
+    firestore_client = init_firestore()
+    if not firestore_client:
+        return {"status": "error", "message": "Firestore nie działa"}
+    try:
+        firestore_client.collection("projects").add(data)
+        return {"status": "ok", "message": "Projekt zapisany"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ---------------------------------------------------------------
+# 🧪 Endpoint testowy – sprawdzenie połączenia z Firestore
+# ---------------------------------------------------------------
+@router.get("/test")
+async def test_firestore():
+    firestore_client = init_firestore()
+    if not firestore_client:
+        return {"status": "error", "message": "Brak połączenia z Firestore"}
+    try:
+        test_ref = firestore_client.collection("test_connection").document("ping")
+        test_ref.set({"status": "ok"})
+        data = test_ref.get().to_dict()
+        return {"status": "ok", "firestore_result": data}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+# ---------------------------------------------------------------
+# 🔧 Rejestracja tras w aplikacji głównej (FastAPI)
+# ---------------------------------------------------------------
+def register_project_routes(app):
+    app.include_router(router)
+    print("✅ [DEBUG] Zarejestrowano project_routes (FastAPI mode)")
