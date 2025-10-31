@@ -173,3 +173,17 @@ async def check_audit_status_endpoint(
 @app.get("/")
 def read_root():
     return {"Hello": "World"}
+
+# --- 🔗 Integracja z Firestore Master SEO API ---
+from firebase_admin import firestore
+import firebase_admin
+from project_routes import register_project_routes
+
+# Zainicjuj Firestore tylko raz
+if not firebase_admin._apps:
+    firebase_admin.initialize_app()
+
+db = firestore.client()
+register_project_routes(app, db)
+print("✅ [DEBUG] Firestore project_routes zarejestrowane poprawnie.")
+
