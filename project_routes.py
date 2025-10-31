@@ -39,3 +39,13 @@ try:
 except Exception as e:
     db = None
     print(f"❌ Nie udało się połączyć z Firestore: {e}")
+
+# ---------------------------------------------------------------
+# 🔧 Funkcja rejestrująca blueprint
+# ---------------------------------------------------------------
+def register_project_routes(app, _db=None):
+    global db
+    if _db:
+        db = _db
+    app.register_blueprint(project_bp)
+    print("✅ [DEBUG] Zarejestrowano project_routes (Firestore mode).")
