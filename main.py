@@ -47,6 +47,9 @@ async def shutdown_event():
 from firebase_admin import credentials, firestore
 import firebase_admin
 
+# Ta instancja 'db' będzie JEDYNĄ instancją w całej aplikacji
+db = None
+
 try:
     if os.getenv("FIREBASE_CREDS_JSON"):
         creds_json = os.getenv("FIREBASE_CREDS_JSON")
@@ -63,7 +66,7 @@ try:
     else:
         print("ℹ️ Firebase już był zainicjalizowany wcześniej.")
 
-    db = firestore.client()
+    db = firestore.client() # <--- Jedyna, główna instancja bazy Firestore
     print("✅ Firestore client aktywny.")
 except Exception as e:
     db = None
@@ -171,8 +174,16 @@ async def check_audit_status_endpoint(
 # 🔧 Etap 4: Firestore API — integracja z project_routes.py
 # ---------------------------------------------------------------
 from project_routes import register_project_routes
-register_project_routes(app)
-print("✅ [DEBUG] Firestore project_routes zarejestrowane poprawnie.")
+
+# === POPRAWKA ===
+# Przekazujemy instancję 'db' (utworzoną w Etapie 2)
+# do funkcji rejestrującej, aby uniknąć podwójnej inicjalizacji.
+if db:
+    register_project_routes(app, db)
+    print("✅ [DEBUG] Firestore project_routes zarejestrowane poprawnie.")
+else:
+    print("❌ [BŁĄD] Nie można zarejestrować project_routes, ponieważ Firestore 'db' jest None.")
+# === KONIEC POPRAWKI ===
 
 
 # ---------------------------------------------------------------
